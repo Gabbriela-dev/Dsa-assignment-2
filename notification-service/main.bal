@@ -511,7 +511,6 @@ function queryOneNotification(int id) returns Notification|error {
     return found;
 }
 
-.
 function listResponse(string? recipientType, string? recipientId, string? orderId,
         string? status, int maxResults) returns Notification[]|http:InternalServerError {
     Notification[]|error result =
@@ -667,7 +666,6 @@ service /notifications on new http:Listener(httpPort) {
             }
         };
     }
-.
     resource function post .(@http:Payload NewNotification newNotification)
             returns http:Created|http:BadRequest|http:InternalServerError {
         if newNotification.recipientId.trim() == "" || newNotification.title.trim() == ""

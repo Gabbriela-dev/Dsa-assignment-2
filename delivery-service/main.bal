@@ -39,6 +39,16 @@ service / on new http:Listener(8085) {
         check from var row in rows do { result.push(row); };
         return result.toJson();
     }
+
+    resource function get deliveries/[string deliveryId]() returns json|http:NotFound {
+        DeliveryRow|sql:Error row = db->queryRow(
+            `SELECT delivery_id, order_id, customer_id, restaurant_id,
+                    driver_id, status, failure_reason
+             FROM deliveries WHERE delivery_id = ${deliveryId}`
+        );
+        if row is sql:Error { return http:NOT_FOUND; }
+        return row.toJson();
+    }
 }
 
 type DriverRow record {|
@@ -47,4 +57,14 @@ type DriverRow record {|
     string? phone;
     string? vehicle_type;
     string? status;
+|};
+
+type DeliveryRow record {|
+    string delivery_id;
+    string order_id;
+    string customer_id;
+    string restaurant_id;
+    string? driver_id;
+    string status;
+    string? failure_reason;
 |};

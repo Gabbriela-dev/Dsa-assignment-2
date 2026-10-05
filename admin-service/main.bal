@@ -8,8 +8,8 @@ import ballerinax/mysql.driver as _;
 
 configurable string dbHost = "localhost";
 configurable int dbPort = 3306;
-configurable string dbUser = "root";
-configurable string dbPassword = "rootpass";
+configurable string dbUser = "admin";
+configurable string dbPassword = "admin";
 configurable string dbName = "admin_db";
 configurable string kafkaUrl = "localhost:9092";
 
@@ -21,9 +21,10 @@ type OrderCreated record {
 };
 
 type DeliveryEvent record {
-    string orderId;
+    string orderId?;
     string driverId;
     string timestamp;
+    string deliveryId?;
 };
 
 type RestaurantStat record {|
@@ -55,6 +56,10 @@ function init() returns error? {
             assigned_at  DATETIME NULL,
             completed_at DATETIME NULL
         )`);
+}
+
+public function main() returns error? {
+    check init();
 }
 
 listener kafka:Listener orderListener = new (kafkaUrl, {
@@ -128,15 +133,22 @@ function storeAssigned(byte[] payload) returns error? {
 function storeCompleted(byte[] payload) returns error? {
     json j = check value:fromJsonString(check string:fromBytes(payload));
     DeliveryEvent d = check j.cloneWithType();
+    string orderId = d.orderId ?: deriveOrderId(d.deliveryId ?: "");
     _ = check db->execute(`
         INSERT INTO delivery_events (order_id, driver_id, completed_at)
-        VALUES (${d.orderId}, ${d.driverId}, ${d.timestamp}) AS new
+        VALUES (${orderId}, ${d.driverId}, ${d.timestamp}) AS new
         ON DUPLICATE KEY UPDATE completed_at = new.completed_at`);
-    log:printInfo("Stored completion for " + d.orderId);
+    log:printInfo("Stored completion for " + orderId);
+}
+
+function deriveOrderId(string deliveryId) returns string {
+    if deliveryId.startsWith("DEL-") {
+        return deliveryId.substring(4);
+    }
+    return deliveryId;
 }
 
 service /admin on new http:Listener(9096) {
-
     resource function get restaurants/stats() returns RestaurantStat[]|error {
         stream<RestaurantStat, sql:Error?> rows = db->query(`
             SELECT restaurant_id AS restaurantId,

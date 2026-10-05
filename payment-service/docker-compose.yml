@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -20,22 +18,47 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://:29092,PLAINTEXT_HOST://:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  postgres:
-    image: postgres:15
-    container_name: payment-postgres
+  payment-db:
+    image: mysql:8.0
+    container_name: payment-db
     environment:
-      POSTGRES_USER: payment_user
-      POSTGRES_PASSWORD: payment_pass
-      POSTGRES_DB: payments_db
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: payments_db
+      MYSQL_USER: payment_user
+      MYSQL_PASSWORD: payment_pass
     ports:
-      - "5432:5432"
+      - "3308:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - payment_mysql_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-payment.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-upayment_user", "-ppayment_pass"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  payment-service:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      BAL_CONFIG_VAR_DBHOST: payment-db
+      BAL_CONFIG_VAR_DBPORT: 3306
+      BAL_CONFIG_VAR_DBUSER: payment_user
+      BAL_CONFIG_VAR_DBPASSWORD: payment_pass
+      BAL_CONFIG_VAR_DBNAME: payments_db
+      BAL_CONFIG_VAR_KAFKABROKER: kafka:29092
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
 
 volumes:
-  postgres_data:
+  payment_mysql_data:

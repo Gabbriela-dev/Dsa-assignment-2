@@ -4,11 +4,11 @@ import ballerina/sql;
 import ballerina/log;
 
 final mysql:Client db = check new (
-    host = DB_HOST,
-    port = DB_PORT,
-    user = DB_USER,
-    password = DB_PASS,
-    database = DB_NAME
+    host = dbHost,
+    port = dbPort,
+    user = dbUser,
+    password = dbPassword,
+    database = dbName
 );
 
 function savePayment(string pid, string oid, string cid, decimal amt, string cur, string method) returns error? {
@@ -21,8 +21,8 @@ function savePayment(string pid, string oid, string cid, decimal amt, string cur
 
 function markStatus(string pid, string status, string reason) returns error? {
     _ = check db->execute(`
-        UPDATE payments 
-        SET status = ${status}, reason = ${reason}, updated_at = CURRENT_TIMESTAMP 
+        UPDATE payments
+        SET status = ${status}, reason = ${reason}, updated_at = CURRENT_TIMESTAMP
         WHERE payment_id = ${pid}
     `);
     log:printInfo("payment " + pid + " now " + status);

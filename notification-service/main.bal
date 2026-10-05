@@ -1,6 +1,3 @@
-// Notification service for the DSA612S food delivery platform.
-// Reads Kafka events, creates notifications and stores them in MySQL.
-// The REST API is used to view and update notifications.
 
 import ballerina/http;
 import ballerina/lang.runtime;
@@ -29,10 +26,10 @@ const string TOPIC_DELIVERY_COMPLETED = "delivery.completed";
 
 const int PARTY_LOOKUP_ATTEMPTS = 5;
 
-// Notification recipient types.
+
 type RecipientType "CUSTOMER"|"RESTAURANT"|"DRIVER";
 
-// Notification record used by the database and REST API.
+
 type Notification record {|
     int id;
     string recipientType;
@@ -47,7 +44,7 @@ type Notification record {|
     string? readAt;
 |};
 
-// Request body for creating a manual notification.
+
 type NewNotification record {|
     RecipientType recipientType;
     string recipientId;
@@ -56,7 +53,7 @@ type NewNotification record {|
     string message;
 |};
 
-// Stores the people linked to an order for later event processing.
+
 type OrderParties record {|
     string orderId;
     string customerId;
@@ -64,7 +61,7 @@ type OrderParties record {|
     string? driverId;
 |};
 
-// Event data used by the notification service. Extra fields are ignored.
+
 type OrderCreatedEvent record {
     string orderId;
     string customerId;
@@ -122,7 +119,7 @@ function init() returns error? {
     log:printInfo("Notification Service database is ready");
 }
 
-// Notification channels used for each recipient type.
+
 function channelsFor(RecipientType recipientType) returns string[] {
     if recipientType == "CUSTOMER" {
         return ["PUSH", "EMAIL"];
@@ -133,7 +130,7 @@ function channelsFor(RecipientType recipientType) returns string[] {
     return ["PUSH", "SMS"];
 }
 
-// Channels are simulated by writing the notification to the log.
+
 function dispatchToChannels(string[] channelList, RecipientType recipientType,
         string recipientId, string title, string message) {
     foreach string channel in channelList {
@@ -141,7 +138,7 @@ function dispatchToChannels(string[] channelList, RecipientType recipientType,
     }
 }
 
-// Save and send a notification. Duplicate events are ignored.
+
 function createNotification(string logicalEvent, string eventType, string? orderId,
         RecipientType recipientType, string recipientId, string title, string message)
         returns error? {
@@ -165,13 +162,13 @@ function createNotification(string logicalEvent, string eventType, string? order
     dispatchToChannels(channelList, recipientType, recipientId, title, message);
 }
 
-// Convert a Kafka message payload to JSON.
+
 function toJson(byte[] payload) returns json|error {
     string text = check string:fromBytes(payload);
     return value:fromJsonString(text);
 }
 
-// Get the people linked to an order.
+
 function findParties(string orderId) returns OrderParties|error? {
     OrderParties|error row = db->queryRow(`
         SELECT order_id AS orderId, customer_id AS customerId,
@@ -184,7 +181,7 @@ function findParties(string orderId) returns OrderParties|error? {
     return row;
 }
 
-// The status event can arrive before orders.created. Try the lookup again.
+
 function waitForParties(string orderId) returns OrderParties|error? {
     foreach int attempt in 1 ... PARTY_LOOKUP_ATTEMPTS {
         OrderParties|error? parties = findParties(orderId);
@@ -294,7 +291,7 @@ function handlePaymentCompleted(byte[] payload) returns error? {
         "CUSTOMER", evt.customerId, "Payment successful",
         string `We received your payment${paymentText(evt)} for order ${orderId}.`);
 
-    // Get the restaurant from the saved order.
+ 
     OrderParties? parties = check waitForParties(orderId);
     if parties is OrderParties {
         check createNotification("PAYMENT_COMPLETED", TOPIC_PAYMENT_COMPLETED, orderId,
@@ -315,7 +312,7 @@ function handlePaymentFailed(byte[] payload) returns error? {
         string `Payment for order ${evt.orderId} failed: ${reason}.`);
 }
 
-// Format the payment amount when it is available.
+
 function paymentText(PaymentEvent evt) returns string {
     decimal? amount = evt?.amount;
     string? currency = evt?.currency;
@@ -341,7 +338,7 @@ function handleDeliveryAssigned(byte[] payload) returns error? {
         return;
     }
 
-    // Save the driver for later status events.
+
     _ = check db->execute(`
         UPDATE order_parties SET driver_id = ${evt.driverId} WHERE order_id = ${orderId}`);
 
@@ -368,7 +365,7 @@ function handleDeliveryCompleted(byte[] payload) returns error? {
         return;
     }
 
-    // Use the same event key as the DELIVERED status to avoid duplicate notices.
+    
     check createNotification("ORDER_DELIVERED", TOPIC_DELIVERY_COMPLETED, orderId,
         "CUSTOMER", parties.customerId, "Order delivered",
         string `Your order ${orderId} has been delivered. Enjoy your meal!`);
@@ -377,42 +374,47 @@ function handleDeliveryCompleted(byte[] payload) returns error? {
         string `Order ${orderId} was delivered to the customer.`);
 }
 
-// Each Kafka topic has its own listener and consumer group.
 listener kafka:Listener orderCreatedListener = new (kafkaUrl, {
     groupId: "notification-service-orders-created",
     topics: [TOPIC_ORDER_CREATED],
     offsetReset: "earliest"
-});
+} 
+);
 
 listener kafka:Listener orderStatusListener = new (kafkaUrl, {
     groupId: "notification-service-orders-status",
     topics: [TOPIC_ORDER_STATUS],
     offsetReset: "earliest"
-});
+}
+);
 
 listener kafka:Listener paymentCompletedListener = new (kafkaUrl, {
     groupId: "notification-service-payments-completed",
     topics: [TOPIC_PAYMENT_COMPLETED],
     offsetReset: "earliest"
-});
+}
+);
 
 listener kafka:Listener paymentFailedListener = new (kafkaUrl, {
     groupId: "notification-service-payments-failed",
     topics: [TOPIC_PAYMENT_FAILED],
     offsetReset: "earliest"
-});
+}
+);
 
 listener kafka:Listener deliveryAssignedListener = new (kafkaUrl, {
     groupId: "notification-service-delivery-assigned",
     topics: [TOPIC_DELIVERY_ASSIGNED],
     offsetReset: "earliest"
-});
+}
+);
 
 listener kafka:Listener deliveryCompletedListener = new (kafkaUrl, {
     groupId: "notification-service-delivery-completed",
     topics: [TOPIC_DELIVERY_COMPLETED],
     offsetReset: "earliest"
-});
+}
+);
 
 service on orderCreatedListener {
     remote function onConsumerRecord(kafka:BytesConsumerRecord[] records) {
@@ -480,7 +482,6 @@ service on deliveryCompletedListener {
     }
 }
 
-// Get notifications using the supplied filters.
 function queryNotifications(string? recipientType, string? recipientId, string? orderId,
         string? status, int maxResults) returns Notification[]|error {
     stream<Notification, sql:Error?> rows = db->query(`
@@ -510,7 +511,7 @@ function queryOneNotification(int id) returns Notification|error {
     return found;
 }
 
-// Run the notification query and return an HTTP error if it fails.
+.
 function listResponse(string? recipientType, string? recipientId, string? orderId,
         string? status, int maxResults) returns Notification[]|http:InternalServerError {
     Notification[]|error result =
@@ -537,12 +538,12 @@ function isValidRecipientType(string? recipientType) returns boolean {
 
 service /notifications on new http:Listener(httpPort) {
 
-    // Health check
+  
     resource function get health() returns string {
         return "Notification Service is running";
     }
 
-    // List notifications with optional filters.
+
     resource function get .(string? recipientType, string? recipientId, string? status,
             int maxResults = 100)
             returns Notification[]|http:BadRequest|http:InternalServerError {
@@ -557,7 +558,7 @@ service /notifications on new http:Listener(httpPort) {
         return listResponse(recipientType, recipientId, (), status, maxResults);
     }
 
-    // Notifications for one customer.
+
     resource function get customer/[string customerId](string? status, int maxResults = 100)
             returns Notification[]|http:BadRequest|http:InternalServerError {
         if !isValidStatus(status) || maxResults < 1 || maxResults > 500 {
@@ -570,7 +571,7 @@ service /notifications on new http:Listener(httpPort) {
         return listResponse("CUSTOMER", customerId, (), status, maxResults);
     }
 
-    // Notifications for one restaurant.
+   
     resource function get restaurant/[string restaurantId](string? status, int maxResults = 100)
             returns Notification[]|http:BadRequest|http:InternalServerError {
         if !isValidStatus(status) || maxResults < 1 || maxResults > 500 {
@@ -583,7 +584,7 @@ service /notifications on new http:Listener(httpPort) {
         return listResponse("RESTAURANT", restaurantId, (), status, maxResults);
     }
 
-    // Notifications for one driver.
+ 
     resource function get driver/[string driverId](string? status, int maxResults = 100)
             returns Notification[]|http:BadRequest|http:InternalServerError {
         if !isValidStatus(status) || maxResults < 1 || maxResults > 500 {
@@ -596,13 +597,12 @@ service /notifications on new http:Listener(httpPort) {
         return listResponse("DRIVER", driverId, (), status, maxResults);
     }
 
-    // Notifications for one order.
     resource function get orders/[string orderId]()
             returns Notification[]|http:InternalServerError {
         return listResponse((), (), orderId, (), 500);
     }
 
-    // Get one notification.
+  
     resource function get [int id]()
             returns Notification|http:NotFound|http:InternalServerError {
         Notification|error found = queryOneNotification(id);
@@ -624,7 +624,7 @@ service /notifications on new http:Listener(httpPort) {
         };
     }
 
-    // Mark a notification as read.
+  
     resource function put [int id]/read()
             returns Notification|http:NotFound|http:InternalServerError {
         Notification|error found = queryOneNotification(id);
@@ -667,8 +667,7 @@ service /notifications on new http:Listener(httpPort) {
             }
         };
     }
-
-    // Create a manual notification.
+.
     resource function post .(@http:Payload NewNotification newNotification)
             returns http:Created|http:BadRequest|http:InternalServerError {
         if newNotification.recipientId.trim() == "" || newNotification.title.trim() == ""

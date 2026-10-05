@@ -4,10 +4,13 @@ import ballerina/time;
 
 function processPayment(OrderCreatedEvent order) returns string {
     string pid = "pay-" + uuid:createRandomUuid().substring(0, 8);
+    decimal amount = order.totalAmount;
+    string currency = order.currency ?: "NAD";
+    string paymentMethod = order.paymentMethod ?: "CARD";
 
-    checkpanic savePayment(pid, order.orderId, order.customerId, order.amount, order.currency, order.paymentMethod);
+    checkpanic savePayment(pid, order.orderId, order.customerId, amount, currency, paymentMethod);
 
-    boolean ok = order.amount < 5000.00;
+    boolean ok = amount < 5000.00;
     string now = time:utcToString(time:utcNow());
 
     if ok {
@@ -16,10 +19,10 @@ function processPayment(OrderCreatedEvent order) returns string {
             paymentId: pid,
             orderId: order.orderId,
             customerId: order.customerId,
-            amount: order.amount,
-            currency: order.currency,
+            amount: amount,
+            currency: currency,
             status: "COMPLETED",
-            method: order.paymentMethod,
+            method: paymentMethod,
             processedAt: now
         };
         checkpanic publishEvent(SUCCESS_TOPIC, doneEvt);
@@ -30,8 +33,8 @@ function processPayment(OrderCreatedEvent order) returns string {
             paymentId: pid,
             orderId: order.orderId,
             customerId: order.customerId,
-            amount: order.amount,
-            currency: order.currency,
+            amount: amount,
+            currency: currency,
             status: "FAILED",
             reason: "amount too high (simulated)",
             processedAt: now

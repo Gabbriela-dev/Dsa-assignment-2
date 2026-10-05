@@ -3,19 +3,15 @@ import ballerina/uuid;
 import ballerina/time;
 
 function processPayment(OrderCreatedEvent order) returns string {
-    // make a short unique id
     string pid = "pay-" + uuid:createRandomUuid().substring(0, 8);
 
-    // always save first as pending
     checkpanic savePayment(pid, order.orderId, order.customerId, order.amount, order.currency, order.paymentMethod);
 
-    // fake rule: fail big orders (just to test the FAILED path)
     boolean ok = order.amount < 5000.00;
     string now = time:utcToString(time:utcNow());
 
     if ok {
         checkpanic markStatus(pid, "COMPLETED", "ok");
-
         PaymentCompletedEvent doneEvt = {
             paymentId: pid,
             orderId: order.orderId,
@@ -30,7 +26,6 @@ function processPayment(OrderCreatedEvent order) returns string {
         log:printInfo("paid order " + order.orderId);
     } else {
         checkpanic markStatus(pid, "FAILED", "amount too high");
-
         PaymentFailedEvent failEvt = {
             paymentId: pid,
             orderId: order.orderId,

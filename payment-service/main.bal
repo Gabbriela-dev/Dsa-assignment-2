@@ -1,1 +1,1 @@
-// every point not needed, services start on their own
+// entry point not needed, services start on their own

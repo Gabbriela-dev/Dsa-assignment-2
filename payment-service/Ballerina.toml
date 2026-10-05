@@ -1,3 +1,9 @@
+[package]
+org = "alpha_tech"
+name = "payment_service"
+version = "0.1.0"
+distribution = "2201.9.0"
+
 [[dependency]]
 org = "ballerinax"
 name = "mysql"

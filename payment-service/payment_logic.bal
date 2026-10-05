@@ -3,14 +3,20 @@ import ballerina/uuid;
 import ballerina/time;
 
 function processPayment(OrderCreatedEvent order) returns string {
-    // make a short unique id
     string pid = "pay-" + uuid:createRandomUuid().substring(0, 8);
 
-    // always save first as pending
-    checkpanic savePayment(pid, order.orderId, order.customerId, order.amount, order.currency, order.paymentMethod);
+    // Order Service currently supplies totalAmount only. Payment uses the
+    // platform defaults for fields that are not part of the order contract.
+    decimal amount = order.totalAmount;
+    string currency = "NAD";
+    string paymentMethod = "CARD";
 
-    // fake rule: fail big orders (just to test the FAILED path)
-    boolean ok = order.amount < 5000.00;
+    checkpanic savePayment(
+        pid, order.orderId, order.customerId,
+        amount, currency, paymentMethod
+    );
+
+    boolean ok = amount < 5000.00;
     string now = time:utcToString(time:utcNow());
 
     if ok {
@@ -20,10 +26,10 @@ function processPayment(OrderCreatedEvent order) returns string {
             paymentId: pid,
             orderId: order.orderId,
             customerId: order.customerId,
-            amount: order.amount,
-            currency: order.currency,
+            amount: amount,
+            currency: currency,
             status: "COMPLETED",
-            method: order.paymentMethod,
+            method: paymentMethod,
             processedAt: now
         };
         checkpanic publishEvent(SUCCESS_TOPIC, doneEvt);
@@ -35,8 +41,8 @@ function processPayment(OrderCreatedEvent order) returns string {
             paymentId: pid,
             orderId: order.orderId,
             customerId: order.customerId,
-            amount: order.amount,
-            currency: order.currency,
+            amount: amount,
+            currency: currency,
             status: "FAILED",
             reason: "amount too high (simulated)",
             processedAt: now

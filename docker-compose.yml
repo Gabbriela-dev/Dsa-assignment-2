@@ -1,0 +1,63 @@
+version: "3.9"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks: [food-net]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports: ["9092:9092"]
+    networks: [food-net]
+
+  mysql:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: delivery_db
+      MYSQL_USER: delivery
+      MYSQL_PASSWORD: delivery
+    ports: ["3306:3306"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./delivery-service/db/init.sql:/docker-entrypoint-initdb.d/01-delivery.sql:ro
+    networks: [food-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpw"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  delivery-service:
+    build: ./delivery-service
+    ports: ["8085:8085"]
+    environment:
+      dbHost: mysql
+      dbPort: 3306
+      dbUser: delivery
+      dbPassword: delivery
+      dbName: delivery_db
+      kafkaBroker: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks: [food-net]
+
+volumes:
+  mysql_data:
+
+networks:
+  food-net:
+    driver: bridge

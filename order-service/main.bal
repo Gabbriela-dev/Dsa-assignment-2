@@ -3,6 +3,7 @@ import ballerina/sql;
 import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
 import ballerinax/kafka;
+import ballerina/time;
 
 configurable string dbHost = ?;
 configurable int dbPort = ?;
@@ -44,6 +45,7 @@ type OrderCreatedEvent record {|
     int quantity;
     decimal totalAmount;
     string status;
+    string timestamp;
 |};
 
 type OrderStatusEvent record {|
@@ -157,15 +159,16 @@ resource function post .(@http:Payload NewOrder newOrder)
         status: status
     };
 
-    OrderCreatedEvent orderEvent = {
-        orderId: orderId,
-        customerId: newOrder.customerId,
-        restaurantId: newOrder.restaurantId,
-        itemId: newOrder.itemId,
-        quantity: newOrder.quantity,
-        totalAmount: newOrder.totalAmount,
-        status: status
-    };
+   OrderCreatedEvent orderEvent = {
+    orderId: orderId,
+    customerId: newOrder.customerId,
+    restaurantId: newOrder.restaurantId,
+    itemId: newOrder.itemId,
+    quantity: newOrder.quantity,
+    totalAmount: newOrder.totalAmount,
+    status: status,
+    timestamp: time:utcToString(time:utcNow())
+};
 
     json eventJson = orderEvent;
 

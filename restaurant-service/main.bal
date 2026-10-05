@@ -1,17 +1,17 @@
 import ballerina/http;
 import ballerina/sql;
+import ballerina/lang.value;
+import ballerina/log;
 import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
-
-
-// DATABASE CONFIGURATION
-
+import ballerinax/kafka;
 
 configurable string dbHost = ?;
 configurable int dbPort = ?;
 configurable string dbUser = ?;
 configurable string dbPassword = ?;
 configurable string dbName = ?;
+configurable string kafkaUrl = ?;
 
 final mysql:Client dbClient = check new (
     host = dbHost,
@@ -20,10 +20,6 @@ final mysql:Client dbClient = check new (
     database = dbName,
     port = dbPort
 );
-
-
-// RECORD TYPES
-
 
 type Restaurant record {|
     string restaurantId;
@@ -63,17 +59,20 @@ type CounterResult record {|
     int nextId;
 |};
 
-
-// ID COUNTERS
-
+type OrderCreatedEvent record {|
+    string orderId;
+    string customerId;
+    string restaurantId;
+    string itemId;
+    int quantity;
+    decimal totalAmount;
+    string status;
+|};
 
 int restaurantCounter = 1;
 int menuItemCounter = 1;
 
-
-// INITIALISE COUNTERS
-
-
+//initialise counters
 function initialiseCounters() returns error? {
 
     CounterResult restaurantResult = check dbClient->queryRow(
@@ -105,32 +104,100 @@ function initialiseCounters() returns error? {
     menuItemCounter = menuItemResult.nextId;
 }
 
-
-// STARTUP
-
-
+//startup
 public function main() returns error? {
     check initialiseCounters();
 }
 
+//kafka listener
+listener kafka:Listener orderListener = new (kafkaUrl, {
+    groupId: "restaurant-service",
+    topics: ["orders.created"]
+});
 
-// RESTAURANT SERVICE
+//listen for created orders
+service on orderListener {
 
+    remote function onConsumerRecord(kafka:BytesConsumerRecord[] records) {
 
+        foreach kafka:BytesConsumerRecord kafkaRecord in records {
+
+            error? result = processOrder(kafkaRecord.value);
+
+            if result is error {
+                log:printError(
+                    "Failed to process orders.created event",
+                    'error = result
+                );
+            }
+        }
+    }
+}
+
+//process order event
+function processOrder(byte[] payload) returns error? {
+
+    string message = check string:fromBytes(payload);
+
+    json eventJson = check value:fromJsonString(message);
+
+    OrderCreatedEvent orderEvent = check eventJson.cloneWithType();
+
+    MenuItem|error existingItem = dbClient->queryRow(
+        `SELECT
+            item_id AS itemId,
+            restaurant_id AS restaurantId,
+            name,
+            price,
+            quantity,
+            available
+         FROM menu_items
+         WHERE item_id = ${orderEvent.itemId}
+         AND restaurant_id = ${orderEvent.restaurantId}`,
+        MenuItem
+    );
+
+    if existingItem is sql:NoRowsError {
+        log:printError(
+            string `Menu item ${orderEvent.itemId} not found for order ${orderEvent.orderId}`
+        );
+        return;
+    }
+
+    if existingItem is error {
+        return existingItem;
+    }
+
+    int newQuantity = existingItem.quantity - orderEvent.quantity;
+
+    if newQuantity < 0 {
+        newQuantity = 0;
+    }
+
+    boolean available = newQuantity > 0;
+
+    _ = check dbClient->execute(
+        `UPDATE menu_items
+         SET quantity = ${newQuantity},
+             available = ${available}
+         WHERE item_id = ${orderEvent.itemId}
+         AND restaurant_id = ${orderEvent.restaurantId}`
+    );
+
+    log:printInfo(
+        string `Inventory updated for ${orderEvent.itemId}. New quantity: ${newQuantity}`
+    );
+}
+
+//restaurant service
 service /restaurants on new http:Listener(8082) {
 
-   
-    // HEALTH CHECK
-    
-
+    //health check
     resource function get health() returns string {
         return "Restaurant Service is running";
     }
 
-   
-    // CREATE RESTAURANT
-   
-
+    //create restaurant
     resource function post .(@http:Payload NewRestaurant newRestaurant)
             returns Restaurant|http:InternalServerError {
 
@@ -167,10 +234,7 @@ service /restaurants on new http:Listener(8082) {
         return restaurant;
     }
 
-    
-    // GET RESTAURANT
-    
-
+    //get restaurant
     resource function get [string restaurantId]()
             returns Restaurant|http:NotFound|http:InternalServerError {
 
@@ -205,10 +269,7 @@ service /restaurants on new http:Listener(8082) {
         };
     }
 
-  
-    // ADD MENU ITEM
-    
-
+    //add menu item
     resource function post [string restaurantId]/menu(
             @http:Payload NewMenuItem newItem)
             returns MenuItem|http:NotFound|http:InternalServerError {
@@ -278,10 +339,7 @@ service /restaurants on new http:Listener(8082) {
         return menuItem;
     }
 
-   
-    // GET RESTAURANT MENU
-    
-
+    //get restaurant menu
     resource function get [string restaurantId]/menu()
             returns MenuItem[]|http:NotFound|http:InternalServerError {
 
@@ -345,10 +403,7 @@ service /restaurants on new http:Listener(8082) {
         return restaurantMenu;
     }
 
-   
-    // UPDATE INVENTORY
-    
-
+    //update inventory
     resource function put [string restaurantId]/menu/[string itemId]/inventory(
             @http:Payload InventoryUpdate inventoryUpdate)
             returns MenuItem|http:NotFound|http:InternalServerError {

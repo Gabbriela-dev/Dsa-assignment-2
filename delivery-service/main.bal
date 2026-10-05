@@ -2,6 +2,7 @@ import ballerina/http;
 import ballerina/log;
 import ballerina/sql;
 import ballerina/time;
+import ballerina/uuid;
 import ballerinax/kafka;
 import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
@@ -28,6 +29,11 @@ final kafka:Producer producer = check new (kafkaBroker, {
 listener kafka:Listener orderCreatedListener = new (kafkaBroker, {
     groupId: "delivery-service-group",
     topics: ["orders.created"]
+});
+
+listener kafka:Listener orderReadyListener = new (kafkaBroker, {
+    groupId: "delivery-service-group",
+    topics: ["orders.ready"]
 });
 
 service / on new http:Listener(8085) {
@@ -60,6 +66,44 @@ service / on new http:Listener(8085) {
         if row is sql:Error { return http:NOT_FOUND; }
         return row.toJson();
     }
+
+        resource function post deliveries/[string deliveryId]/complete()
+            returns json|http:Conflict|error {
+        DeliveryRow|sql:Error row = db->queryRow(
+            `SELECT driver_id FROM deliveries
+             WHERE delivery_id = ${deliveryId} AND status = 'PICKED_UP'`
+        );
+        if row is sql:Error { return http:CONFLICT; }
+        string? driverId = row.driver_id;
+
+        transaction {
+            _ = check db->execute(
+                `UPDATE deliveries SET status = 'DELIVERED',
+                 delivered_at = NOW(), updated_at = NOW()
+                 WHERE delivery_id = ${deliveryId}`
+            );
+            if driverId is string {
+                _ = check db->execute(
+                    `UPDATE drivers SET status = 'AVAILABLE',
+                     active_delivery_id = NULL, updated_at = NOW()
+                     WHERE driver_id = ${driverId}`
+                );
+            }
+            _ = check db->execute(
+                `INSERT INTO delivery_events (delivery_id, status)
+                 VALUES (${deliveryId}, 'DELIVERED')`
+            );
+            check commit;
+        }
+
+        _ = check publishEvent("delivery.completed", {
+            eventId: uuid:createType4AsString(),
+            deliveryId: deliveryId,
+            driverId: driverId ?: "",
+            timestamp: time:utcNow().toString()
+        });
+        return { message: "Delivered", deliveryId: deliveryId };
+    }
 }
 
 service on orderCreatedListener {
@@ -88,6 +132,78 @@ service on orderCreatedListener {
 
             _ = check recordProcessedEvent(eventId, "orders.created");
             log:printInfo("Delivery created: " + deliveryId);
+        }
+        _ = check caller->commit();
+    }
+}
+
+service on orderReadyListener {
+    remote function onConsumerRecord(kafka:Caller caller,
+                                     kafka:BytesConsumerRecord[] records) returns error? {
+        foreach var rec in records {
+            string valueStr = check string:fromBytes(rec.value);
+            json payload = check valueStr.fromJsonString();
+
+            string eventId = check payload.eventId.ensureType(string);
+            boolean alreadyDone = check isEventProcessed(eventId);
+            if alreadyDone { continue; }
+
+            string orderId = check payload.orderId.ensureType(string);
+            string deliveryId = "DEL-" + orderId;
+
+            DriverRow|sql:Error driverRow = db->queryRow(
+                `SELECT driver_id, name, phone, vehicle_type, status
+                 FROM drivers WHERE status = 'AVAILABLE'
+                 ORDER BY driver_id ASC LIMIT 1`
+            );
+
+            if driverRow is sql:Error {
+                _ = check db->execute(
+                    `UPDATE deliveries SET status = 'FAILED',
+                     failure_reason = 'No available driver',
+                     updated_at = NOW()
+                     WHERE delivery_id = ${deliveryId}`
+                );
+                _ = check publishEvent("delivery.failed", {
+                    eventId: uuid:createType4AsString(),
+                    deliveryId: deliveryId,
+                    orderId: orderId,
+                    reason: "No available driver",
+                    timestamp: time:utcNow().toString()
+                });
+                log:printWarn("No driver available for " + deliveryId);
+            } else {
+                _ = check db->execute(
+                    `UPDATE drivers SET status = 'BUSY',
+                     active_delivery_id = ${deliveryId}, updated_at = NOW()
+                     WHERE driver_id = ${driverRow.driver_id}
+                       AND status = 'AVAILABLE'`
+                );
+                _ = check db->execute(
+                    `UPDATE deliveries
+                     SET driver_id = ${driverRow.driver_id},
+                         status = 'ASSIGNED',
+                         assigned_at = NOW(), updated_at = NOW()
+                     WHERE delivery_id = ${deliveryId}`
+                );
+                _ = check db->execute(
+                    `INSERT INTO delivery_events (delivery_id, status, notes)
+                     VALUES (${deliveryId}, 'ASSIGNED',
+                             CONCAT('Driver ', ${driverRow.driver_id}))`
+                );
+                _ = check publishEvent("delivery.assigned", {
+                    eventId: uuid:createType4AsString(),
+                    deliveryId: deliveryId,
+                    orderId: orderId,
+                    driverId: driverRow.driver_id,
+                    driverName: driverRow.name ?: "",
+                    timestamp: time:utcNow().toString()
+                });
+                log:printInfo("Driver " + driverRow.driver_id +
+                              " assigned to " + deliveryId);
+            }
+
+            _ = check recordProcessedEvent(eventId, "orders.ready");
         }
         _ = check caller->commit();
     }

@@ -1,7 +1,5 @@
-# Add these two services to the group's root docker-compose.yml, under "services:".
-# The Kafka service is already there; kafka:29092 is its internal address.
 
-  notification-db:
+   notification-db:
     image: mysql:8.0
     container_name: notification-db
     ports:

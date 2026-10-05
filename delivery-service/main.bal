@@ -2,6 +2,7 @@ import ballerina/http;
 import ballerina/log;
 import ballerina/sql;
 import ballerina/time;
+import ballerinax/kafka;
 import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
 
@@ -10,6 +11,7 @@ configurable int dbPort = 3306;
 configurable string dbUser = "delivery";
 configurable string dbPassword = "delivery";
 configurable string dbName = "delivery_db";
+configurable string kafkaBroker = "localhost:9092";
 
 final mysql:Client db = check new (
     host = dbHost,
@@ -18,6 +20,10 @@ final mysql:Client db = check new (
     password = dbPassword,
     database = dbName
 );
+
+final kafka:Producer producer = check new (kafkaBroker, {
+    clientId: "delivery-service"
+});
 
 service / on new http:Listener(8085) {
 
@@ -49,6 +55,13 @@ service / on new http:Listener(8085) {
         if row is sql:Error { return http:NOT_FOUND; }
         return row.toJson();
     }
+}
+
+function publishEvent(string topic, json payload) returns error? {
+    _ = check producer->send({
+        topic: topic,
+        value: payload.toJsonString().toBytes()
+    });
 }
 
 type DriverRow record {|

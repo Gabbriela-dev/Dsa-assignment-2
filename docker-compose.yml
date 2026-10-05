@@ -45,3 +45,26 @@ services:
     environment:
       BAL_CONFIG_VAR_DBHOST: admin-db
       BAL_CONFIG_VAR_KAFKAURL: kafka:29092
+
+
+  food-delivery-db:
+    image: mysql:8.0
+    container_name: food-delivery-db
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: food_delivery
+      MYSQL_USER: foodapp
+      MYSQL_PASSWORD: foodpass
+    volumes:
+      - food-delivery-data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  food-delivery-data:
+      

@@ -78,5 +78,85 @@ service on orderListener {
         foreach kafka:BytesConsumerRecord rec in records {
             error? result = storeOrder(rec.value);
             if result is error {
-                log:printError("Bad order
+                log:printError("Bad orders.created message, skipped", 'error = result);
+            }
+        }
+    }
+}
+
+service on assignedListener {
+    remote function onConsumerRecord(kafka:BytesConsumerRecord[] records) {
+        foreach kafka:BytesConsumerRecord rec in records {
+            error? result = storeAssigned(rec.value);
+            if result is error {
+                log:printError("Bad delivery.assigned message, skipped", 'error = result);
+            }
+        }
+    }
+}
+
+service on completedListener {
+    remote function onConsumerRecord(kafka:BytesConsumerRecord[] records) {
+        foreach kafka:BytesConsumerRecord rec in records {
+            error? result = storeCompleted(rec.value);
+            if result is error {
+                log:printError("Bad delivery.completed message, skipped", 'error = result);
+            }
+        }
+    }
+}
+
+function storeOrder(byte[] payload) returns error? {
+    json j = check value:fromJsonString(check string:fromBytes(payload));
+    OrderCreated o = check j.cloneWithType();
+    _ = check db->execute(`
+        INSERT INTO order_events (order_id, restaurant_id, total_amount, created_at)
+        VALUES (${o.orderId}, ${o.restaurantId}, ${o.totalAmount}, ${o.timestamp})
+        ON DUPLICATE KEY UPDATE order_id = order_id`);
+    log:printInfo("Stored order " + o.orderId);
+}
+
+function storeAssigned(byte[] payload) returns error? {
+    json j = check value:fromJsonString(check string:fromBytes(payload));
+    DeliveryEvent d = check j.cloneWithType();
+    _ = check db->execute(`
+        INSERT INTO delivery_events (order_id, driver_id, assigned_at)
+        VALUES (${d.orderId}, ${d.driverId}, ${d.timestamp}) AS new
+        ON DUPLICATE KEY UPDATE driver_id = new.driver_id, assigned_at = new.assigned_at`);
+    log:printInfo("Stored assignment for " + d.orderId);
+}
+
+function storeCompleted(byte[] payload) returns error? {
+    json j = check value:fromJsonString(check string:fromBytes(payload));
+    DeliveryEvent d = check j.cloneWithType();
+    _ = check db->execute(`
+        INSERT INTO delivery_events (order_id, driver_id, completed_at)
+        VALUES (${d.orderId}, ${d.driverId}, ${d.timestamp}) AS new
+        ON DUPLICATE KEY UPDATE completed_at = new.completed_at`);
+    log:printInfo("Stored completion for " + d.orderId);
+}
+
+service /admin on new http:Listener(9096) {
+
+    resource function get restaurants/stats() returns RestaurantStat[]|error {
+        stream<RestaurantStat, sql:Error?> rows = db->query(`
+            SELECT restaurant_id AS restaurantId,
+                   COUNT(*) AS orderCount,
+                   SUM(total_amount) AS revenue
+            FROM order_events
+            GROUP BY restaurant_id`);
+        return from RestaurantStat r in rows select r;
+    }
+
+    resource function get deliveries/performance() returns DriverPerformance[]|error {
+        stream<DriverPerformance, sql:Error?> rows = db->query(`
+            SELECT driver_id AS driverId,
+                   COUNT(*) AS deliveries,
+                   AVG(TIMESTAMPDIFF(MINUTE, assigned_at, completed_at)) AS avgMinutes
+            FROM delivery_events
+            WHERE assigned_at IS NOT NULL AND completed_at IS NOT NULL
+            GROUP BY driver_id`);
+        return from DriverPerformance p in rows select p;
+    }
+}
 ```

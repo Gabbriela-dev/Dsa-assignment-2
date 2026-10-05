@@ -63,7 +63,61 @@ services:
 
     environment:
       BAL_CONFIG_VAR_DBHOST: admin-db
+      BAL_CONFIG_VAR_DBPORT: 3306
+      BAL_CONFIG_VAR_DBUSER: admin
+      BAL_CONFIG_VAR_DBPASSWORD: admin
+      BAL_CONFIG_VAR_DBNAME: admin_db
       BAL_CONFIG_VAR_KAFKAURL: kafka:29092
+
+    depends_on:
+      admin-db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+    networks:
+      - food-net
+
+
+  payment-db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: payments_db
+      MYSQL_USER: payment_user
+      MYSQL_PASSWORD: payment_pass
+    ports:
+      - "3308:3306"
+    volumes:
+      - payment_mysql_data:/var/lib/mysql
+      - ./payment-service/db/init.sql:/docker-entrypoint-initdb.d/01-payment.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-upayment_user", "-ppayment_pass"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - food-net
+
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8080:8080"
+    environment:
+      BAL_CONFIG_VAR_DBHOST: payment-db
+      BAL_CONFIG_VAR_DBPORT: 3306
+      BAL_CONFIG_VAR_DBUSER: payment_user
+      BAL_CONFIG_VAR_DBPASSWORD: payment_pass
+      BAL_CONFIG_VAR_DBNAME: payments_db
+      BAL_CONFIG_VAR_KAFKABROKER: kafka:29092
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - food-net
 
 
   food-delivery-db:
@@ -158,6 +212,7 @@ services:
 volumes:
   admin_mysql_data:
   delivery_mysql_data:
+  payment_mysql_data:
   food-delivery-data:
 
 

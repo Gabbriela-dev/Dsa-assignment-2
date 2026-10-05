@@ -1,10 +1,10 @@
-public type OrderCreatedEvent record {|
+public type OrderCreatedEvent record {
     string orderId;
     string customerId;
     decimal totalAmount;
     string? currency;
     string? paymentMethod;
-|};
+};
 
 public type PaymentCompletedEvent record {|
     string paymentId;

@@ -1,13 +1,15 @@
-
-public type newOrder record {
+// incoming from order service
+public type OrderCreatedEvent record {
     string orderId;
     string customerId;
     string restaurantId;
     decimal amount;
     string currency;
-    string paymentMethod;}
+    string paymentMethod;
+};
 
-public type paymentCompletedEvent record {
+// what we send when payment works
+public type PaymentCompletedEvent record {
     string paymentId;
     string orderId;
     string customerId;
@@ -18,6 +20,7 @@ public type paymentCompletedEvent record {
     string processedAt;
 };
 
+// what we send when it fails
 public type PaymentFailedEvent record {
     string paymentId;
     string orderId;
@@ -29,6 +32,7 @@ public type PaymentFailedEvent record {
     string processedAt;
 };
 
+// matches our sql table
 public type PaymentRecord record {
     string payment_id;
     string order_id;
@@ -37,7 +41,7 @@ public type PaymentRecord record {
     string currency;
     string method;
     string status;
-    string reason;
+    string? reason;
     string created_at;
     string updated_at;
 };

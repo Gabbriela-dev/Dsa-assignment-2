@@ -1,49 +1,42 @@
-import ballerinax/postgresql;
+import ballerinax/mysql;
+import ballerinax/mysql.driver as _;
+import ballerina/sql;
 import ballerina/log;
 
-final postgresql:Client dbClient = check new (
+final mysql:Client db = check new (
     host = DB_HOST,
     port = DB_PORT,
-    username = DB_USER,
+    user = DB_USER,
     password = DB_PASS,
     database = DB_NAME
 );
 
-
-isolated function createPaymentRecord(
-          string paymentId, 
-          string orderId, 
-          string customerId, 
-          decimal amount, 
-          string currency, 
-          string method) 
-          returns error? {
-            
-    _ = check dbClient->execute(`
+// save a new payment row (status starts as PENDING)
+function savePayment(string pid, string oid, string cid, decimal amt, string cur, string method) returns error? {
+    _ = check db->execute(`
         INSERT INTO payments (payment_id, order_id, customer_id, amount, currency, method, status)
-        VALUES (${paymentId}, ${orderId}, ${customerId}, ${amount}, ${currency}, ${method}, 'PENDING')
+        VALUES (${pid}, ${oid}, ${cid}, ${amt}, ${cur}, ${method}, 'PENDING')
     `);
-
-    log:printInfo("Payment record created in DB: " + paymentId);
+    log:printInfo("saved payment " + pid);
 }
 
-isolated function updatePaymentStatus(string paymentId, string status, string reason) returns error? {
-    _ = check dbClient->execute(`
+// change status to COMPLETED or FAILED
+function markStatus(string pid, string status, string reason) returns error? {
+    _ = check db->execute(`
         UPDATE payments 
         SET status = ${status}, reason = ${reason}, updated_at = CURRENT_TIMESTAMP 
-        WHERE payment_id = ${paymentId}
+        WHERE payment_id = ${pid}
     `);
-    log:printInfo("Payment status updated to " + status + " for: " + paymentId);
+    log:printInfo("payment " + pid + " now " + status);
 }
 
-isolated function getPaymentByOrderId(string orderId) returns PaymentRecord|error? {
-    return dbClient->queryRow(`
-        SELECT * FROM payments WHERE order_id = ${orderId}
-    `);
+// check if this order already got charged
+function findPaymentByOrder(string oid) returns PaymentRecord|error? {
+    return db->queryRow(`SELECT * FROM payments WHERE order_id = ${oid}`);
 }
 
-isolated function getAllPayments() returns PaymentRecord[]|error {
-    return dbClient->query(`
-        SELECT * FROM payments ORDER BY created_at DESC
-    `);
+// for the admin service / testing
+function listAllPayments() returns PaymentRecord[]|error {
+    stream<PaymentRecord, sql:Error?> rs = db->query(`SELECT * FROM payments ORDER BY created_at DESC`);
+    return from PaymentRecord p in rs select p;
 }

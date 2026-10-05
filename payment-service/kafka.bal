@@ -1,39 +1,30 @@
 import ballerinax/kafka;
 import ballerina/log;
 
-final kafka:ProducerConfiguration producerConfig = {
-    clientId: "payment-service-producer",
-    acks: "all" 
-};
+final kafka:Producer producer = check new (KAFKA_BROKER);
 
-final kafka:Producer paymentProducer = check new (KAFKA_BROKER, producerConfig);
-
-isolated function publishPaymentEvent(string topic, anydata eventPayload) returns error? {
-    _ = check paymentProducer->send({
-        topic: topic,
-        value: eventPayload
-    });
-    log:printInfo("Event published to Kafka topic: " + topic);
+function publishEvent(string topic, anydata payload) returns error? {
+    _ = check producer->send({ topic: topic, value: payload });
+    log:printInfo("published to " + topic);
 }
 
-final kafka:ConsumerConfiguration consumerConfig = {
+final kafka:ConsumerConfiguration consumerCfg = {
     groupId: "payment-service-group",
     topics: [ORDER_TOPIC],
-    offsetReset: "earliest"
+    offsetReset: kafka:EARLIEST
 };
 
-
-listener kafka:Listener orderListener = new (KAFKA_BROKER, consumerConfig);
+listener kafka:Listener orderListener = new (KAFKA_BROKER, consumerCfg);
 
 service on orderListener {
-    remote function onConsumerRecord(OrderCreatedEvent[] orders) returns error? {
+    remote function onConsumerRecord(kafka:Caller caller, OrderCreatedEvent[] orders) returns error? {
         foreach var order in orders {
-            log:printInfo("Received new order event: " + order.orderId);
+            log:printInfo("got order " + order.orderId);
 
-            PaymentRecord|error? existingPayment = getPaymentByOrderId(order.orderId);
-            
-            if existingPayment is PaymentRecord {
-                log:printWarn("Payment already exists for order: " + order.orderId + ". Skipping.");
+            // skip if we already charged this order (to avoid double charge)
+            PaymentRecord|error? existing = findPaymentByOrder(order.orderId);
+            if existing is PaymentRecord {
+                log:printWarn("order " + order.orderId + " already paid, skipping");
                 continue;
             }
 

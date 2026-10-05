@@ -1,25 +1,25 @@
 import ballerina/http;
-import ballerina/log;
 
-service / on new http:Listener(HTTP_PORT) {
+service / on new http:Listener(PORT) {
 
+    // simple health check for docker
     resource function get health() returns string {
-        return "Payment Service is running!";
+        return "payment service ok";
     }
 
+    // list all payments
     resource function get payments() returns PaymentRecord[]|http:InternalServerError {
-        PaymentRecord[]|error result = getAllPayments();
+        PaymentRecord[]|error result = listAllPayments();
         if result is error {
-            log:printError("Failed to fetch payments", result);
             return http:INTERNAL_SERVER_ERROR;
         }
         return result;
     }
 
+    // look up one payment by order id
     resource function get payments/order/[string orderId]() returns PaymentRecord|http:NotFound|http:InternalServerError {
-        PaymentRecord|error? result = getPaymentByOrderId(orderId);
+        PaymentRecord|error? result = findPaymentByOrder(orderId);
         if result is error {
-            log:printError("Database error", result);
             return http:INTERNAL_SERVER_ERROR;
         }
         if result is () {

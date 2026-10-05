@@ -4,6 +4,7 @@ import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
 import ballerinax/kafka;
 import ballerina/time;
+import ballerina/uuid;
 
 configurable string dbHost = ?;
 configurable int dbPort = ?;
@@ -11,6 +12,7 @@ configurable string dbUser = ?;
 configurable string dbPassword = ?;
 configurable string dbName = ?;
 configurable string kafkaUrl = ?;
+
 
 final mysql:Client dbClient = check new (
     host = dbHost,
@@ -38,6 +40,7 @@ type Order record {|
 |};
 
 type OrderCreatedEvent record {|
+    string eventId;
     string orderId;
     string customerId;
     string restaurantId;
@@ -160,6 +163,7 @@ resource function post .(@http:Payload NewOrder newOrder)
     };
 
    OrderCreatedEvent orderEvent = {
+    eventId: uuid:createType4AsString(),
     orderId: orderId,
     customerId: newOrder.customerId,
     restaurantId: newOrder.restaurantId,
@@ -444,7 +448,27 @@ if kafkaResult is error {
         }
     };
 }
+// Publish READY event for Delivery Service
+if newStatus == "READY" {
+    json readyEvent = {
+        eventId: uuid:createType4AsString(),
+        orderId: orderId,
+        timestamp: time:utcToString(time:utcNow())
+    };
 
+    kafka:Error? readyKafkaResult = kafkaProducer->send({
+        topic: "orders.ready",
+        value: readyEvent.toJsonString().toBytes()
+    });
+
+    if readyKafkaResult is error {
+        return <http:InternalServerError>{
+            body: {
+                message: "Order updated to READY but orders.ready event failed"
+            }
+        };
+    }
+}
 
 
 

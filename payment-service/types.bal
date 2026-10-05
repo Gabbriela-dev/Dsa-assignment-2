@@ -1,4 +1,3 @@
-// Event published by Order Service on orders.created.
 public type OrderCreatedEvent record {
     string eventId;
     string orderId;

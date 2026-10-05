@@ -21,7 +21,6 @@ service on orderListener {
         foreach var order in orders {
             log:printInfo("got order " + order.orderId);
 
-            // skip if we already charged this order (to avoid double charge)
             PaymentRecord|error? existing = findPaymentByOrder(order.orderId);
             if existing is PaymentRecord {
                 log:printWarn("order " + order.orderId + " already paid, skipping");

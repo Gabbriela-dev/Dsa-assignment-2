@@ -8,17 +8,13 @@ function processPayment(OrderCreatedEvent order) returns string {
     string currency = "NAD";
     string paymentMethod = "CARD";
 
-    checkpanic savePayment(
-        pid, order.orderId, order.customerId,
-        amount, currency, paymentMethod
-    );
+    checkpanic savePayment(pid, order.orderId, order.customerId, order.amount, order.currency, order.paymentMethod);
 
-    boolean ok = amount < 5000.00;
+    boolean ok = order.amount < 5000.00;
     string now = time:utcToString(time:utcNow());
 
     if ok {
         checkpanic markStatus(pid, "COMPLETED", "ok");
-
         PaymentCompletedEvent doneEvt = {
             paymentId: pid,
             orderId: order.orderId,
@@ -33,7 +29,6 @@ function processPayment(OrderCreatedEvent order) returns string {
         log:printInfo("paid order " + order.orderId);
     } else {
         checkpanic markStatus(pid, "FAILED", "amount too high");
-
         PaymentFailedEvent failEvt = {
             paymentId: pid,
             orderId: order.orderId,

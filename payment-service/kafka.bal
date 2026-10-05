@@ -1,7 +1,7 @@
 import ballerinax/kafka;
 import ballerina/log;
 
-final kafka:Producer producer = check new (KAFKA_BROKER);
+final kafka:Producer producer = check new (kafkaBroker);
 
 function publishEvent(string topic, anydata payload) returns error? {
     _ = check producer->send({ topic: topic, value: payload });
@@ -14,7 +14,7 @@ final kafka:ConsumerConfiguration consumerCfg = {
     offsetReset: kafka:EARLIEST
 };
 
-listener kafka:Listener orderListener = new (KAFKA_BROKER, consumerCfg);
+listener kafka:Listener orderListener = new (kafkaBroker, consumerCfg);
 
 service on orderListener {
     remote function onConsumerRecord(kafka:Caller caller, OrderCreatedEvent[] orders) returns error? {

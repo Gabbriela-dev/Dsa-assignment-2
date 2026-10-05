@@ -6,25 +6,18 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:9092
-
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
-
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: CONTROLLER://:9093,INTERNAL://:29092,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-
-    networks:
-      - food-net
-
+    networks: [food-net]
 
   admin-db:
     image: mysql:8.0
@@ -33,34 +26,18 @@ services:
       MYSQL_DATABASE: admin_db
       MYSQL_USER: admin
       MYSQL_PASSWORD: admin
-    ports:
-      - "3306:3306"
-    volumes:
-      - admin_mysql_data:/var/lib/mysql
-    networks:
-      - food-net
-
+    ports: ["3306:3306"]
+    volumes: [admin_mysql_data:/var/lib/mysql]
+    networks: [food-net]
     healthcheck:
-      test:
-        [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "localhost",
-          "-uadmin",
-          "-padmin"
-        ]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uadmin", "-padmin"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-
   admin-service:
     build: ./admin-service
-    ports:
-      - "9096:9096"
-
+    ports: ["9096:9096"]
     environment:
       BAL_CONFIG_VAR_DBHOST: admin-db
       BAL_CONFIG_VAR_DBPORT: 3306
@@ -68,16 +45,10 @@ services:
       BAL_CONFIG_VAR_DBPASSWORD: admin
       BAL_CONFIG_VAR_DBNAME: admin_db
       BAL_CONFIG_VAR_KAFKAURL: kafka:29092
-
     depends_on:
-      admin-db:
-        condition: service_healthy
-      kafka:
-        condition: service_started
-
-    networks:
-      - food-net
-
+      admin-db: {condition: service_healthy}
+      kafka: {condition: service_started}
+    networks: [food-net]
 
   payment-db:
     image: mysql:8.0
@@ -86,8 +57,7 @@ services:
       MYSQL_DATABASE: payments_db
       MYSQL_USER: payment_user
       MYSQL_PASSWORD: payment_pass
-    ports:
-      - "3308:3306"
+    ports: ["3308:3306"]
     volumes:
       - payment_mysql_data:/var/lib/mysql
       - ./payment-service/db/init.sql:/docker-entrypoint-initdb.d/01-payment.sql:ro
@@ -96,14 +66,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    networks:
-      - food-net
-
+    networks: [food-net]
 
   payment-service:
     build: ./payment-service
-    ports:
-      - "8080:8080"
+    ports: ["8080:8080"]
     environment:
       BAL_CONFIG_VAR_DBHOST: payment-db
       BAL_CONFIG_VAR_DBPORT: 3306
@@ -112,19 +79,14 @@ services:
       BAL_CONFIG_VAR_DBNAME: payments_db
       BAL_CONFIG_VAR_KAFKABROKER: kafka:29092
     depends_on:
-      payment-db:
-        condition: service_healthy
-      kafka:
-        condition: service_started
-    networks:
-      - food-net
-
+      payment-db: {condition: service_healthy}
+      kafka: {condition: service_started}
+    networks: [food-net]
 
   food-delivery-db:
     image: mysql:8.0
     container_name: food-delivery-db
-    ports:
-      - "3307:3306"
+    ports: ["3307:3306"]
     environment:
       MYSQL_ROOT_PASSWORD: rootpass
       MYSQL_DATABASE: food_delivery
@@ -138,59 +100,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-      
-    depends_on:
-      admin-db:
-        condition: service_healthy
-      kafka:
-        condition: service_started
-
-    networks:
-      - food-net
-
+    networks: [food-net]
 
   delivery-db:
     image: mysql:8.0
-
-    command:
-      - --default-authentication-plugin=mysql_native_password
-
+    command: [--default-authentication-plugin=mysql_native_password]
     environment:
       MYSQL_ROOT_PASSWORD: rootpw
       MYSQL_DATABASE: delivery_db
       MYSQL_USER: delivery
       MYSQL_PASSWORD: delivery
-
     volumes:
       - delivery_mysql_data:/var/lib/mysql
       - ./delivery-service/db/init.sql:/docker-entrypoint-initdb.d/01-delivery.sql:ro
-
-    networks:
-      - food-net
-
+    networks: [food-net]
     healthcheck:
-      test:
-        [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "localhost",
-          "-uroot",
-          "-prootpw"
-        ]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpw"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-
   delivery-service:
     build: ./delivery-service
-
-    ports:
-      - "8085:8085"
-
+    ports: ["8085:8085"]
     environment:
       dbHost: delivery-db
       dbPort: 3306
@@ -198,23 +130,16 @@ services:
       dbPassword: delivery
       dbName: delivery_db
       kafkaBroker: kafka:29092
-
     depends_on:
-      delivery-db:
-        condition: service_healthy
-      kafka:
-        condition: service_started
-
-    networks:
-      - food-net
-
+      delivery-db: {condition: service_healthy}
+      kafka: {condition: service_started}
+    networks: [food-net]
 
 volumes:
   admin_mysql_data:
   delivery_mysql_data:
   payment_mysql_data:
   food-delivery-data:
-
 
 networks:
   food-net:

@@ -44,16 +44,16 @@ final mysql:Client db = check new (dbHost, dbUser, dbPassword, dbName, dbPort);
 function init() returns error? {
     _ = check db->execute(`
         CREATE TABLE IF NOT EXISTS order_events (
-            order_id      VARCHAR(50) PRIMARY KEY,
+            order_id VARCHAR(50) PRIMARY KEY,
             restaurant_id VARCHAR(50) NOT NULL,
-            total_amount  DECIMAL(10,2) NOT NULL,
-            created_at    DATETIME NOT NULL
+            total_amount DECIMAL(10,2) NOT NULL,
+            created_at DATETIME NOT NULL
         )`);
     _ = check db->execute(`
         CREATE TABLE IF NOT EXISTS delivery_events (
-            order_id     VARCHAR(50) PRIMARY KEY,
-            driver_id    VARCHAR(50) NOT NULL,
-            assigned_at  DATETIME NULL,
+            order_id VARCHAR(50) PRIMARY KEY,
+            driver_id VARCHAR(50) NOT NULL,
+            assigned_at DATETIME NULL,
             completed_at DATETIME NULL
         )`);
 }
@@ -134,7 +134,6 @@ function storeAssigned(byte[] payload) returns error? {
 function storeCompleted(byte[] payload) returns error? {
     json j = check value:fromJsonString(check string:fromBytes(payload));
     DeliveryEvent d = check j.cloneWithType();
-    string orderId = d.orderId ?: deriveOrderId(d.deliveryId ?: "");
     string orderId = d.orderId ?: deriveOrderId(d.deliveryId ?: "");
     _ = check db->execute(`
         INSERT INTO delivery_events (order_id, driver_id, completed_at)

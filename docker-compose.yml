@@ -19,6 +19,68 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks: [food-net]
 
+  food-delivery-db:
+    image: mysql:8.0
+    container_name: food-delivery-db
+    ports: ["3307:3306"]
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: food_delivery
+      MYSQL_USER: foodapp
+      MYSQL_PASSWORD: foodpass
+    volumes:
+      - food-delivery-data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [food-net]
+
+  customer-service:
+    build: ./customer-service
+    ports: ["8081:8081"]
+    environment:
+      BAL_CONFIG_VAR_DBHOST: food-delivery-db
+      BAL_CONFIG_VAR_DBPORT: 3306
+      BAL_CONFIG_VAR_DBUSER: foodapp
+      BAL_CONFIG_VAR_DBPASSWORD: foodpass
+      BAL_CONFIG_VAR_DBNAME: food_delivery
+    depends_on:
+      food-delivery-db: {condition: service_healthy}
+    networks: [food-net]
+
+  restaurant-service:
+    build: ./restaurant-service
+    ports: ["8082:8082"]
+    environment:
+      BAL_CONFIG_VAR_DBHOST: food-delivery-db
+      BAL_CONFIG_VAR_DBPORT: 3306
+      BAL_CONFIG_VAR_DBUSER: foodapp
+      BAL_CONFIG_VAR_DBPASSWORD: foodpass
+      BAL_CONFIG_VAR_DBNAME: food_delivery
+      BAL_CONFIG_VAR_KAFKAURL: kafka:29092
+    depends_on:
+      food-delivery-db: {condition: service_healthy}
+      kafka: {condition: service_started}
+    networks: [food-net]
+
+  order-service:
+    build: ./order-service
+    ports: ["8083:8083"]
+    environment:
+      BAL_CONFIG_VAR_DBHOST: food-delivery-db
+      BAL_CONFIG_VAR_DBPORT: 3306
+      BAL_CONFIG_VAR_DBUSER: foodapp
+      BAL_CONFIG_VAR_DBPASSWORD: foodpass
+      BAL_CONFIG_VAR_DBNAME: food_delivery
+      BAL_CONFIG_VAR_KAFKAURL: kafka:29092
+    depends_on:
+      food-delivery-db: {condition: service_healthy}
+      kafka: {condition: service_started}
+    networks: [food-net]
+
   admin-db:
     image: mysql:8.0
     environment:
@@ -83,23 +145,31 @@ services:
       kafka: {condition: service_started}
     networks: [food-net]
 
-  food-delivery-db:
+  notification-db:
     image: mysql:8.0
-    container_name: food-delivery-db
-    ports: ["3307:3306"]
     environment:
       MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: food_delivery
-      MYSQL_USER: foodapp
-      MYSQL_PASSWORD: foodpass
-    volumes:
-      - food-delivery-data:/var/lib/mysql
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      MYSQL_DATABASE: notification_db
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
       interval: 5s
       timeout: 5s
       retries: 20
+    networks: [food-net]
+
+  notification-service:
+    build: ./notification-service
+    ports: ["8086:8085"]
+    environment:
+      BAL_CONFIG_VAR_DBHOST: notification-db
+      BAL_CONFIG_VAR_DBPORT: 3306
+      BAL_CONFIG_VAR_DBUSER: root
+      BAL_CONFIG_VAR_DBPASSWORD: rootpass
+      BAL_CONFIG_VAR_DBNAME: notification_db
+      BAL_CONFIG_VAR_KAFKAURL: kafka:29092
+    depends_on:
+      notification-db: {condition: service_healthy}
+      kafka: {condition: service_started}
     networks: [food-net]
 
   delivery-db:

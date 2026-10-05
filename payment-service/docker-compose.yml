@@ -1,4 +1,0 @@
-# Payment Service is integrated into the root docker-compose.yml.
-# This standalone file is intentionally not a second Kafka/database stack.
-# Run the project with ../docker-compose.yml so Payment uses the same Kafka
-# broker as the other services and MySQL for its payment database.

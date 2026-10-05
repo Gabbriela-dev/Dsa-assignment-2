@@ -2,12 +2,14 @@ import ballerina/http;
 import ballerina/sql;
 import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
+import ballerinax/kafka;
 
 configurable string dbHost = ?;
 configurable int dbPort = ?;
 configurable string dbUser = ?;
 configurable string dbPassword = ?;
 configurable string dbName = ?;
+configurable string kafkaUrl = ?;
 
 final mysql:Client dbClient = check new (
     host = dbHost,
@@ -15,6 +17,13 @@ final mysql:Client dbClient = check new (
     password = dbPassword,
     database = dbName,
     port = dbPort
+);
+
+final kafka:Producer kafkaProducer = check new (
+    kafkaUrl,
+    {
+        clientId: "order-service"
+    }
 );
 
 type Order record {|
@@ -25,6 +34,22 @@ type Order record {|
     int quantity;
     decimal totalAmount;
     string status;
+|};
+
+type OrderCreatedEvent record {|
+    string orderId;
+    string customerId;
+    string restaurantId;
+    string itemId;
+    int quantity;
+    decimal totalAmount;
+    string status;
+|};
+
+type OrderStatusEvent record {|
+    string orderId;
+    string previousStatus;
+    string newStatus;
 |};
 
 type NewOrder record {|
@@ -75,65 +100,92 @@ service /orders on new http:Listener(8083) {
         return "Order Service is running";
     }
 
-    //create order
-    resource function post .(@http:Payload NewOrder newOrder)
-            returns Order|http:BadRequest|http:InternalServerError {
+   //create order
+resource function post .(@http:Payload NewOrder newOrder)
+        returns Order|http:BadRequest|http:InternalServerError {
 
-        if newOrder.quantity <= 0 {
-            return <http:BadRequest>{
-                body: {
-                    message: "Quantity must be greater than zero"
-                }
-            };
-        }
-
-        if newOrder.totalAmount <= 0.0d {
-            return <http:BadRequest>{
-                body: {
-                    message: "Total amount must be greater than zero"
-                }
-            };
-        }
-
-        string orderId = string `ORD-${orderCounter}`;
-        orderCounter += 1;
-
-        string status = "CREATED";
-
-        sql:ExecutionResult|error result = dbClient->execute(
-            `INSERT INTO orders
-            (order_id, customer_id, restaurant_id, item_id,
-             quantity, total_amount, status)
-            VALUES
-            (${orderId},
-             ${newOrder.customerId},
-             ${newOrder.restaurantId},
-             ${newOrder.itemId},
-             ${newOrder.quantity},
-             ${newOrder.totalAmount},
-             ${status})`
-        );
-
-        if result is error {
-            return <http:InternalServerError>{
-                body: {
-                    message: "Failed to create order"
-                }
-            };
-        }
-
-        Order createdOrder = {
-            orderId: orderId,
-            customerId: newOrder.customerId,
-            restaurantId: newOrder.restaurantId,
-            itemId: newOrder.itemId,
-            quantity: newOrder.quantity,
-            totalAmount: newOrder.totalAmount,
-            status: status
+    if newOrder.quantity <= 0 {
+        return <http:BadRequest>{
+            body: {
+                message: "Quantity must be greater than zero"
+            }
         };
-
-        return createdOrder;
     }
+
+    if newOrder.totalAmount <= 0.0d {
+        return <http:BadRequest>{
+            body: {
+                message: "Total amount must be greater than zero"
+            }
+        };
+    }
+
+    string orderId = string `ORD-${orderCounter}`;
+    orderCounter += 1;
+
+    string status = "CREATED";
+
+    sql:ExecutionResult|error result = dbClient->execute(
+        `INSERT INTO orders
+        (order_id, customer_id, restaurant_id, item_id,
+         quantity, total_amount, status)
+        VALUES
+        (${orderId},
+         ${newOrder.customerId},
+         ${newOrder.restaurantId},
+         ${newOrder.itemId},
+         ${newOrder.quantity},
+         ${newOrder.totalAmount},
+         ${status})`
+    );
+
+    if result is error {
+        return <http:InternalServerError>{
+            body: {
+                message: "Failed to create order"
+            }
+        };
+    }
+
+    Order createdOrder = {
+        orderId: orderId,
+        customerId: newOrder.customerId,
+        restaurantId: newOrder.restaurantId,
+        itemId: newOrder.itemId,
+        quantity: newOrder.quantity,
+        totalAmount: newOrder.totalAmount,
+        status: status
+    };
+
+    OrderCreatedEvent orderEvent = {
+        orderId: orderId,
+        customerId: newOrder.customerId,
+        restaurantId: newOrder.restaurantId,
+        itemId: newOrder.itemId,
+        quantity: newOrder.quantity,
+        totalAmount: newOrder.totalAmount,
+        status: status
+    };
+
+    json eventJson = orderEvent;
+
+    kafka:Error? kafkaResult = kafkaProducer->send(
+        {
+            topic: "orders.created",
+            value: eventJson.toJsonString().toBytes()
+        }
+    );
+
+    if kafkaResult is error {
+        return <http:InternalServerError>{
+            body: {
+                message: "Order created but Kafka event failed"
+            }
+        };
+    }
+
+    return createdOrder;
+}
 
     //get all orders
     resource function get .()
@@ -366,6 +418,32 @@ service /orders on new http:Listener(8083) {
                 }
             };
         }
+        //publish status event
+OrderStatusEvent statusEvent = {
+    orderId: orderId,
+    previousStatus: currentStatus,
+    newStatus: newStatus
+};
+
+json statusEventJson = statusEvent;
+
+kafka:Error? kafkaResult = kafkaProducer->send(
+    {
+        topic: "orders.status.updated",
+        value: statusEventJson.toJsonString().toBytes()
+    }
+);
+
+if kafkaResult is error {
+    return <http:InternalServerError>{
+        body: {
+            message: "Order status updated but Kafka event failed"
+        }
+    };
+}
+
+
+
 
         Order updatedOrder = {
             orderId: foundOrder.orderId,
@@ -379,3 +457,4 @@ service /orders on new http:Listener(8083) {
 
         return updatedOrder;
     }
+}

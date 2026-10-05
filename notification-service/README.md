@@ -1,4 +1,3 @@
-
 # Notification Service
 
 This is the notification service for the DSA612S Distributed Food Delivery Platform.
@@ -11,14 +10,12 @@ The REST API runs on port 8085.
 
 The service listens to these topics:
 
-| Topic | Used for |
-|---|---|
-| `orders.created` | Creates notifications for the customer and restaurant |
-| `orders.status.updated` | Sends updates to the customer and, for some statuses, the restaurant and driver |
-| `payments.completed` | Notifies the customer and restaurant about a completed payment |
-| `payments.failed` | Notifies the customer when a payment fails |
-| `delivery.assigned` | Notifies the driver, customer and restaurant |
-| `delivery.completed` | Notifies the driver, customer and restaurant |
+- `orders.created` - Creates notifications for the customer and restaurant.
+- `orders.status.updated` - Sends updates to the customer and, for some statuses, the restaurant and driver.
+- `payments.completed` - Notifies the customer and restaurant about a completed payment.
+- `payments.failed` - Notifies the customer when a payment fails.
+- `delivery.assigned` - Notifies the driver, customer and restaurant.
+- `delivery.completed` - Notifies the driver, customer and restaurant.
 
 The service only uses the fields it needs from each event. When an order is created, the customer, restaurant and driver information is kept in `order_parties` so it can be used by later events.
 
@@ -26,27 +23,23 @@ The service only uses the fields it needs from each event. When an order is crea
 
 The channels are currently simulated by writing them to the log.
 
-| Recipient | Channels |
-|---|---|
-| Customer | PUSH, EMAIL |
-| Restaurant | DASHBOARD, SMS |
-| Driver | PUSH, SMS |
+- Customer: `PUSH`, `EMAIL`
+- Restaurant: `DASHBOARD`, `SMS`
+- Driver: `PUSH`, `SMS`
 
 ## REST API
 
 The service runs on port 8085.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/notifications/health` | Checks if the service is running |
-| GET | `/notifications?recipientType=&recipientId=&status=&maxResults=` | Gets notifications using optional filters |
-| GET | `/notifications/customer/{customerId}?status=UNREAD` | Gets notifications for a customer |
-| GET | `/notifications/restaurant/{restaurantId}?status=UNREAD` | Gets notifications for a restaurant |
-| GET | `/notifications/driver/{driverId}?status=UNREAD` | Gets notifications for a driver |
-| GET | `/notifications/orders/{orderId}` | Gets notifications for an order |
-| GET | `/notifications/{id}` | Gets one notification |
-| PUT | `/notifications/{id}/read` | Marks a notification as read |
-| POST | `/notifications` | Creates a notification manually |
+- `GET /notifications/health` - Checks if the service is running.
+- `GET /notifications?recipientType=&recipientId=&status=&maxResults=` - Gets notifications using optional filters.
+- `GET /notifications/customer/{customerId}?status=UNREAD` - Gets notifications for a customer.
+- `GET /notifications/restaurant/{restaurantId}?status=UNREAD` - Gets notifications for a restaurant.
+- `GET /notifications/driver/{driverId}?status=UNREAD` - Gets notifications for a driver.
+- `GET /notifications/orders/{orderId}` - Gets notifications for an order.
+- `GET /notifications/{id}` - Gets one notification.
+- `PUT /notifications/{id}/read` - Marks a notification as read.
+- `POST /notifications` - Creates a notification manually.
 
 The available notification statuses are `UNREAD` and `READ`.
 

@@ -40,7 +40,11 @@ type DriverPerformance record {|
 
 final mysql:Client db = check new (dbHost, dbUser, dbPassword, dbName, dbPort);
 
-public function main() returns error? {\n    check init();\n}\n\nfunction init() returns error? {
+public function main() returns error? {
+    check init();
+}
+
+function init() returns error? {
     _ = check db->execute(`
         CREATE TABLE IF NOT EXISTS order_events (
             order_id      VARCHAR(50) PRIMARY KEY,

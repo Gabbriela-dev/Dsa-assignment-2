@@ -1,4 +1,21 @@
 import ballerina/http;
+import ballerina/sql;
+import ballerinax/mysql;
+import ballerinax/mysql.driver as _;
+
+configurable string dbHost = ?;
+configurable int dbPort = ?;
+configurable string dbUser = ?;
+configurable string dbPassword = ?;
+configurable string dbName = ?;
+
+final mysql:Client dbClient = check new (
+    host = dbHost,
+    user = dbUser,
+    password = dbPassword,
+    database = dbName,
+    port = dbPort
+);
 
 type Order record {|
     string orderId;
@@ -22,24 +39,50 @@ type StatusUpdate record {|
     string status;
 |};
 
-map<Order> orders = {};
+type CounterResult record {|
+    int nextId;
+|};
+
 int orderCounter = 1;
+
+//initialise counter
+function initialiseCounter() returns error? {
+
+    CounterResult orderResult = check dbClient->queryRow(
+        `SELECT CAST(
+            COALESCE(
+                MAX(CAST(SUBSTRING(order_id, 5) AS UNSIGNED)),
+                0
+            ) + 1
+            AS SIGNED
+         ) AS nextId
+         FROM orders`,
+        CounterResult
+    );
+
+    orderCounter = orderResult.nextId;
+}
+
+//startup
+public function main() returns error? {
+    check initialiseCounter();
+}
 
 service /orders on new http:Listener(8083) {
 
-    // HEALTH CHECK
+    //health check
     resource function get health() returns string {
         return "Order Service is running";
     }
 
-    // CREATE ORDER
+    //create order
     resource function post .(@http:Payload NewOrder newOrder)
-            returns Order|http:BadRequest {
+            returns Order|http:BadRequest|http:InternalServerError {
 
         if newOrder.quantity <= 0 {
             return <http:BadRequest>{
                 body: {
-                    message: "Order quantity must be greater than 0"
+                    message: "Quantity must be greater than zero"
                 }
             };
         }
@@ -47,13 +90,37 @@ service /orders on new http:Listener(8083) {
         if newOrder.totalAmount <= 0.0d {
             return <http:BadRequest>{
                 body: {
-                    message: "Total amount must be greater than 0"
+                    message: "Total amount must be greater than zero"
                 }
             };
         }
 
         string orderId = string `ORD-${orderCounter}`;
         orderCounter += 1;
+
+        string status = "CREATED";
+
+        sql:ExecutionResult|error result = dbClient->execute(
+            `INSERT INTO orders
+            (order_id, customer_id, restaurant_id, item_id,
+             quantity, total_amount, status)
+            VALUES
+            (${orderId},
+             ${newOrder.customerId},
+             ${newOrder.restaurantId},
+             ${newOrder.itemId},
+             ${newOrder.quantity},
+             ${newOrder.totalAmount},
+             ${status})`
+        );
+
+        if result is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to create order"
+                }
+            };
+        }
 
         Order createdOrder = {
             orderId: orderId,
@@ -62,81 +129,71 @@ service /orders on new http:Listener(8083) {
             itemId: newOrder.itemId,
             quantity: newOrder.quantity,
             totalAmount: newOrder.totalAmount,
-            status: "CREATED"
+            status: status
         };
-
-        orders[orderId] = createdOrder;
 
         return createdOrder;
     }
 
-    // GET ALL ORDERS
-    resource function get .() returns Order[] {
+    //get all orders
+    resource function get .()
+            returns Order[]|http:InternalServerError {
+
+        stream<Order, sql:Error?> orderStream = dbClient->query(
+            `SELECT
+                order_id AS orderId,
+                customer_id AS customerId,
+                restaurant_id AS restaurantId,
+                item_id AS itemId,
+                quantity,
+                total_amount AS totalAmount,
+                status
+             FROM orders`,
+            Order
+        );
 
         Order[] allOrders = [];
 
-        foreach Order currentOrder in orders {
-            allOrders.push(currentOrder);
+        error? streamError = orderStream.forEach(
+            function(Order orderRecord) {
+                allOrders.push(orderRecord);
+            }
+        );
+
+        if streamError is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to retrieve orders"
+                }
+            };
         }
 
         return allOrders;
     }
 
-    // GET ONE ORDER
+    //get order
     resource function get [string orderId]()
-            returns Order|http:NotFound {
+            returns Order|http:NotFound|http:InternalServerError {
 
-        Order? foundOrder = orders[orderId];
+        Order|error foundOrder = dbClient->queryRow(
+            `SELECT
+                order_id AS orderId,
+                customer_id AS customerId,
+                restaurant_id AS restaurantId,
+                item_id AS itemId,
+                quantity,
+                total_amount AS totalAmount,
+                status
+             FROM orders
+             WHERE order_id = ${orderId}`,
+            Order
+        );
 
         if foundOrder is Order {
             return foundOrder;
         }
 
-        return <http:NotFound>{
-            body: {
-                message: "Order not found"
-            }
-        };
-    }
-
-    // GET CUSTOMER ORDER HISTORY
-    resource function get customer/[string customerId]()
-            returns Order[] {
-
-        Order[] customerOrders = [];
-
-        foreach Order currentOrder in orders {
-            if currentOrder.customerId == customerId {
-                customerOrders.push(currentOrder);
-            }
-        }
-
-        return customerOrders;
-    }
-
-    // GET RESTAURANT ORDERS
-    resource function get restaurant/[string restaurantId]()
-            returns Order[] {
-
-        Order[] restaurantOrders = [];
-
-        foreach Order currentOrder in orders {
-            if currentOrder.restaurantId == restaurantId {
-                restaurantOrders.push(currentOrder);
-            }
-        }
-
-        return restaurantOrders;
-    }
-
-    // UPDATE ORDER STATUS
-    resource function put [string orderId]/status(
-            @http:Payload StatusUpdate statusUpdate)
-            returns Order|http:NotFound|http:BadRequest {
-
-        Order? existingOrder = orders[orderId];
-
-        if existingOrder is () {
+        if foundOrder is sql:NoRowsError {
             return <http:NotFound>{
                 body: {
                     message: "Order not found"
@@ -144,61 +201,181 @@ service /orders on new http:Listener(8083) {
             };
         }
 
-        string currentStatus = existingOrder.status;
+        return <http:InternalServerError>{
+            body: {
+                message: "Failed to retrieve order"
+            }
+        };
+    }
+
+    //get customer orders
+    resource function get customer/[string customerId]()
+            returns Order[]|http:InternalServerError {
+
+        stream<Order, sql:Error?> orderStream = dbClient->query(
+            `SELECT
+                order_id AS orderId,
+                customer_id AS customerId,
+                restaurant_id AS restaurantId,
+                item_id AS itemId,
+                quantity,
+                total_amount AS totalAmount,
+                status
+             FROM orders
+             WHERE customer_id = ${customerId}`,
+            Order
+        );
+
+        Order[] customerOrders = [];
+
+        error? streamError = orderStream.forEach(
+            function(Order orderRecord) {
+                customerOrders.push(orderRecord);
+            }
+        );
+
+        if streamError is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to retrieve customer orders"
+                }
+            };
+        }
+
+        return customerOrders;
+    }
+
+    //get restaurant orders
+    resource function get restaurant/[string restaurantId]()
+            returns Order[]|http:InternalServerError {
+
+        stream<Order, sql:Error?> orderStream = dbClient->query(
+            `SELECT
+                order_id AS orderId,
+                customer_id AS customerId,
+                restaurant_id AS restaurantId,
+                item_id AS itemId,
+                quantity,
+                total_amount AS totalAmount,
+                status
+             FROM orders
+             WHERE restaurant_id = ${restaurantId}`,
+            Order
+        );
+
+        Order[] restaurantOrders = [];
+
+        error? streamError = orderStream.forEach(
+            function(Order orderRecord) {
+                restaurantOrders.push(orderRecord);
+            }
+        );
+
+        if streamError is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to retrieve restaurant orders"
+                }
+            };
+        }
+
+        return restaurantOrders;
+    }
+
+    //update order status
+    resource function put [string orderId]/status(
+            @http:Payload StatusUpdate statusUpdate)
+            returns Order|http:BadRequest|http:NotFound|
+                    http:InternalServerError {
+
+        Order|error foundOrder = dbClient->queryRow(
+            `SELECT
+                order_id AS orderId,
+                customer_id AS customerId,
+                restaurant_id AS restaurantId,
+                item_id AS itemId,
+                quantity,
+                total_amount AS totalAmount,
+                status
+             FROM orders
+             WHERE order_id = ${orderId}`,
+            Order
+        );
+
+        if foundOrder is sql:NoRowsError {
+            return <http:NotFound>{
+                body: {
+                    message: "Order not found"
+                }
+            };
+        }
+
+        if foundOrder is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to retrieve order"
+                }
+            };
+        }
+
+        string currentStatus = foundOrder.status;
         string newStatus = statusUpdate.status;
 
         boolean validTransition = false;
 
-        if currentStatus == "CREATED" && newStatus == "CONFIRMED" {
+        if newStatus == "CANCELLED" {
+            if currentStatus != "DELIVERED" &&
+                    currentStatus != "CANCELLED" {
+                validTransition = true;
+            }
+        } else if currentStatus == "CREATED" &&
+                newStatus == "CONFIRMED" {
             validTransition = true;
-
         } else if currentStatus == "CONFIRMED" &&
                 newStatus == "PREPARING" {
-
             validTransition = true;
-
         } else if currentStatus == "PREPARING" &&
                 newStatus == "READY" {
-
             validTransition = true;
-
         } else if currentStatus == "READY" &&
                 newStatus == "OUT_FOR_DELIVERY" {
-
             validTransition = true;
-
         } else if currentStatus == "OUT_FOR_DELIVERY" &&
                 newStatus == "DELIVERED" {
-
-            validTransition = true;
-
-        } else if newStatus == "CANCELLED" &&
-                currentStatus != "DELIVERED" &&
-                currentStatus != "CANCELLED" {
-
             validTransition = true;
         }
 
         if !validTransition {
             return <http:BadRequest>{
                 body: {
-                    message: string `Invalid status transition from ${currentStatus} to ${newStatus}`
+                    message: string `Invalid order status transition from ${currentStatus} to ${newStatus}`
+                }
+            };
+        }
+
+        sql:ExecutionResult|error result = dbClient->execute(
+            `UPDATE orders
+             SET status = ${newStatus}
+             WHERE order_id = ${orderId}`
+        );
+
+        if result is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to update order status"
                 }
             };
         }
 
         Order updatedOrder = {
-            orderId: existingOrder.orderId,
-            customerId: existingOrder.customerId,
-            restaurantId: existingOrder.restaurantId,
-            itemId: existingOrder.itemId,
-            quantity: existingOrder.quantity,
-            totalAmount: existingOrder.totalAmount,
+            orderId: foundOrder.orderId,
+            customerId: foundOrder.customerId,
+            restaurantId: foundOrder.restaurantId,
+            itemId: foundOrder.itemId,
+            quantity: foundOrder.quantity,
+            totalAmount: foundOrder.totalAmount,
             status: newStatus
         };
 
-        orders[orderId] = updatedOrder;
-
         return updatedOrder;
     }
-}

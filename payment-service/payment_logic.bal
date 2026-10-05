@@ -4,9 +4,6 @@ import ballerina/time;
 
 function processPayment(OrderCreatedEvent order) returns string {
     string pid = "pay-" + uuid:createRandomUuid().substring(0, 8);
-
-    // Order Service currently supplies totalAmount only. Payment uses the
-    // platform defaults for fields that are not part of the order contract.
     decimal amount = order.totalAmount;
     string currency = "NAD";
     string paymentMethod = "CARD";

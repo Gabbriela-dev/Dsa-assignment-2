@@ -2,54 +2,48 @@ import ballerina/log;
 import ballerina/uuid;
 import ballerina/time;
 
-isolated function processPayment(OrderCreatedEvent order) returns string {
+function processPayment(OrderCreatedEvent order) returns string {
+    // make a short unique id
+    string pid = "pay-" + uuid:createRandomUuid().substring(0, 8);
 
-    string paymentId = "pay-" + uuid:createRandomUuid().substring(0, 8);
-    checkpanic createPaymentRecord(paymentId, 
-                                   order.orderId, 
-                                   order.customerId, 
-                                   order.amount, 
-                                   order.currency, 
-                                   order.paymentMethod);
+    // always save first as pending
+    checkpanic savePayment(pid, order.orderId, order.customerId, order.amount, order.currency, order.paymentMethod);
 
-    boolean isSuccess = !order.customerId.endWith("15");
-    
-    string currentTime = time:utcToString(time:utcNow());
+    // fake rule: fail big orders (just to test the FAILED path)
+    boolean ok = order.amount < 5000.00;
+    string now = time:utcToString(time:utcNow());
 
-    if isSuccess {
-        checkpanic updatePaymentStatus(paymentId, "COMPLETED", "Payment processed successfully");
-        
-        PaymentCompletedEvent successEvent = {
-            paymentId: paymentId,
+    if ok {
+        checkpanic markStatus(pid, "COMPLETED", "ok");
+
+        PaymentCompletedEvent doneEvt = {
+            paymentId: pid,
             orderId: order.orderId,
             customerId: order.customerId,
             amount: order.amount,
             currency: order.currency,
             status: "COMPLETED",
             method: order.paymentMethod,
-            processedAt: currentTime
+            processedAt: now
         };
-
-        checkpanic publishPaymentEvent(PAYMENT_SUCCESS_TOPIC, successEvent);
-        log:printInfo("Payment SUCCESS for order: " + order.orderId);
+        checkpanic publishEvent(SUCCESS_TOPIC, doneEvt);
+        log:printInfo("paid order " + order.orderId);
     } else {
-        checkpanic updatePaymentStatus(paymentId, "FAILED", "Insufficient funds (Simulated)");
-        
-        PaymentFailedEvent failedEvent = {
-            paymentId: paymentId,
+        checkpanic markStatus(pid, "FAILED", "amount too high");
+
+        PaymentFailedEvent failEvt = {
+            paymentId: pid,
             orderId: order.orderId,
             customerId: order.customerId,
             amount: order.amount,
             currency: order.currency,
             status: "FAILED",
-            reason: "Insufficient funds (Simulated)",
-            processedAt: currentTime
+            reason: "amount too high (simulated)",
+            processedAt: now
         };
-        
-
-        checkpanic publishPaymentEvent(PAYMENT_FAILED_TOPIC, failedEvent);
-        log:printError("Payment FAILED for order: " + order.orderId);
+        checkpanic publishEvent(FAIL_TOPIC, failEvt);
+        log:printError("payment failed for " + order.orderId);
     }
 
-    return paymentId;
+    return pid;
 }

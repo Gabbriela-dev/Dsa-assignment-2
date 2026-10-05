@@ -1,1 +1,1 @@
-// Entry point is handled by HTTP and Kafka listeners
+// every point not needed, services start on their own

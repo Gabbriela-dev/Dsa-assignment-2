@@ -60,6 +60,7 @@ type CounterResult record {|
 |};
 
 type OrderCreatedEvent record {|
+    string eventId;
     string orderId;
     string customerId;
     string restaurantId;
@@ -67,6 +68,7 @@ type OrderCreatedEvent record {|
     int quantity;
     decimal totalAmount;
     string status;
+    string timestamp;
 |};
 
 int restaurantCounter = 1;

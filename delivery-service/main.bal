@@ -25,6 +25,11 @@ final kafka:Producer producer = check new (kafkaBroker, {
     clientId: "delivery-service"
 });
 
+listener kafka:Listener orderCreatedListener = new (kafkaBroker, {
+    groupId: "delivery-service-group",
+    topics: ["orders.created"]
+});
+
 service / on new http:Listener(8085) {
 
     resource function get health() returns json {
@@ -57,11 +62,60 @@ service / on new http:Listener(8085) {
     }
 }
 
+service on orderCreatedListener {
+    remote function onConsumerRecord(kafka:Caller caller,
+                                     kafka:BytesConsumerRecord[] records) returns error? {
+        foreach var rec in records {
+            string valueStr = check string:fromBytes(rec.value);
+            json payload = check valueStr.fromJsonString();
+
+            string eventId = check payload.eventId.ensureType(string);
+            boolean alreadyDone = check isEventProcessed(eventId);
+            if alreadyDone { continue; }
+
+            string orderId = check payload.orderId.ensureType(string);
+            string customerId = check payload.customerId.ensureType(string);
+            string restaurantId = check payload.restaurantId.ensureType(string);
+            string deliveryId = "DEL-" + orderId;
+
+            _ = check db->execute(
+                `INSERT INTO deliveries
+                    (delivery_id, order_id, customer_id, restaurant_id, status)
+                 VALUES (${deliveryId}, ${orderId}, ${customerId},
+                         ${restaurantId}, 'PENDING')
+                 ON DUPLICATE KEY UPDATE delivery_id = delivery_id`
+            );
+
+            _ = check recordProcessedEvent(eventId, "orders.created");
+            log:printInfo("Delivery created: " + deliveryId);
+        }
+        _ = check caller->commit();
+    }
+}
+
 function publishEvent(string topic, json payload) returns error? {
     _ = check producer->send({
         topic: topic,
         value: payload.toJsonString().toBytes()
     });
+}
+
+function isEventProcessed(string eventId) returns boolean|error {
+    record {| int c; |}|sql:Error result = db->queryRow(
+        `SELECT COUNT(*) AS c FROM processed_events WHERE event_id = ${eventId}`
+    );
+    if result is sql:Error {
+        return result;
+    }
+    return result.c > 0;
+}
+
+function recordProcessedEvent(string eventId, string topic) returns error? {
+    _ = check db->execute(
+        `INSERT INTO processed_events (event_id, topic)
+         VALUES (${eventId}, ${topic})
+         ON DUPLICATE KEY UPDATE processed_at = NOW()`
+    );
 }
 
 type DriverRow record {|

@@ -1,4 +1,3 @@
-```ballerina
 import ballerina/http;
 import ballerina/lang.value;
 import ballerina/log;
@@ -159,4 +158,3 @@ service /admin on new http:Listener(9096) {
         return from DriverPerformance p in rows select p;
     }
 }
-```
